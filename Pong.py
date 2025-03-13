@@ -3,7 +3,7 @@ import sys
 import random
 from PIL import Image 
 import os
-import pygame  # For audio functionality
+import pygame  
 
 # Initialize pygame for sound
 pygame.init()
@@ -15,7 +15,7 @@ if not os.path.exists(sounds_dir):
     os.makedirs(sounds_dir)
 
 # Sound paths (you'll need to add sound files to this directory)
-paddle_hit_sound = "sounds/paddle_hit.wav"
+paddle_hit_sound = "sounds/boing-101318.wav"
 wall_hit_sound = "sounds/wall_hit-3-48114.wav"
 score_sound = "sounds/score.wav"
 button_click_sound = "sounds/click.wav"
@@ -79,6 +79,15 @@ mode_selected = False
 one_player = False
 game_running = False
 game_paused = False
+
+# AI difficulty level (new)
+difficulty_level = "medium"  # Default difficulty
+ai_accuracy = 0.7  # How accurately AI follows the ball (0.0-1.0)
+ai_reaction_delay = 3  # Frames to wait before AI reacts
+ai_max_speed = 15  # Maximum AI paddle speed (adjusted per difficulty)
+ai_prediction_error = 0.3  # How much error in predicting ball trajectory
+ai_edge_weakness = 0.5  # AI is less effective at the edges of the screen
+ai_recovery_delay = 0  # Delay after AI misses before returning to normal behavior
 
 # Paddle and ball speed
 paddle_speed = 20
@@ -151,7 +160,11 @@ def start_game():
 
 def main_game_loop():
     """Main game loop separated for pause functionality."""
-    global game_running, game_paused, score_a, score_b  # Add score_a and score_b here
+    global game_running, game_paused, score_a, score_b, ai_recovery_delay
+    
+    # For AI reaction delay tracking
+    ai_frame_counter = 0
+    ai_recovery_counter = 0
     
     while game_running:
         wn.update()
@@ -161,7 +174,15 @@ def main_game_loop():
             ball.sety(ball.ycor() + ball.dy)
 
             if one_player:
-                ai_move_paddle(paddle_b, ball)
+                # Handle AI recovery delay after player scores
+                if ai_recovery_counter > 0:
+                    ai_recovery_counter -= 1
+                
+                # Implement AI delay based on difficulty
+                ai_frame_counter += 1
+                if ai_frame_counter >= ai_reaction_delay and ai_recovery_counter == 0:
+                    ai_move_paddle(paddle_b, ball)
+                    ai_frame_counter = 0
 
             # Ball collision with top and bottom
             if ball.ycor() > 390 or ball.ycor() < -390:
@@ -174,6 +195,8 @@ def main_game_loop():
                 play_sound(score_sound)
                 reset_ball(ball)
                 update_score(pen)
+                # Add recovery delay for AI after player scores
+                ai_recovery_counter = 30  # Delay AI response briefly after conceding
             elif ball.xcor() < -490:
                 score_b += 1
                 play_sound(score_sound)
@@ -276,18 +299,87 @@ def return_to_menu():
     wn.onscreenclick(None)
     
     draw_main_menu()
+
 def move_paddle(paddle, distance):
     """Moves the paddle up or down while staying within screen limits."""
     new_y = paddle.ycor() + distance
     if -350 < new_y < 350:
         paddle.sety(new_y)
 
+def predict_ball_y(ball, paddle):
+    """Predict where ball will be when it reaches the paddle's x position."""
+    # Calculate time to reach paddle
+    if ball.dx == 0:  # Avoid division by zero
+        return ball.ycor()
+    
+    # Distance to paddle
+    dist_x = abs(paddle.xcor() - ball.xcor())
+    
+    # Time to reach paddle (in game steps)
+    time_steps = dist_x / abs(ball.dx)
+    
+    # Calculate Y position
+    predicted_y = ball.ycor() + (ball.dy * time_steps)
+    
+    # Account for bounces off top and bottom
+    screen_height = 800
+    effective_height = screen_height - 20  # Adjust for ball size
+    
+    # Simulate bounces to get accurate prediction
+    while abs(predicted_y) > effective_height/2:
+        if predicted_y > effective_height/2:
+            # Bounce off top
+            over = predicted_y - effective_height/2
+            predicted_y = effective_height/2 - over
+        elif predicted_y < -effective_height/2:
+            # Bounce off bottom
+            under = -predicted_y - effective_height/2
+            predicted_y = -effective_height/2 + under
+    
+    # Add prediction error based on difficulty
+    error = random.uniform(-ai_prediction_error * 200, ai_prediction_error * 200)
+    predicted_y += error
+    
+    return predicted_y
+
 def ai_move_paddle(paddle, ball):
-    """Moves AI paddle smoothly towards the ball."""
-    if ball.ycor() > paddle.ycor():
-        paddle.sety(paddle.ycor() + min(paddle_speed, abs(ball.ycor() - paddle.ycor())))
-    elif ball.ycor() < paddle.ycor():
-        paddle.sety(paddle.ycor() - min(paddle_speed, abs(ball.ycor() - paddle.ycor())))
+    """Moves AI paddle based on difficulty level."""
+    # Don't move if ball is moving away from the AI
+    if ball.dx < 0:
+        # Sometimes make small random movements when ball is moving away
+        if random.random() < 0.1:
+            random_move = random.uniform(-5, 5)
+            move_paddle(paddle, random_move)
+        return
+    
+    # For more human-like behavior: Add weakness near the edges
+    edge_factor = 1.0
+    if abs(ball.ycor()) > 300:
+        # AI is less effective near the edges
+        edge_factor = 1.0 - (ai_edge_weakness * (abs(ball.ycor()) - 300) / 100)
+        
+    # Predict where the ball will be when it reaches the paddle
+    predicted_y = predict_ball_y(ball, paddle)
+    
+    # Calculate perfect position (where AI should move) with limitations
+    perfect_y = predicted_y * edge_factor
+    
+    # Add randomness based on AI accuracy
+    if random.random() > ai_accuracy:
+        # Add noise to the target position
+        noise_factor = (1 - ai_accuracy) * 150  # More noise for lower accuracy
+        perfect_y += random.uniform(-noise_factor, noise_factor)
+    
+    # Limit AI to screen boundaries
+    perfect_y = max(-350, min(350, perfect_y))
+    
+    # Move towards the calculated position (with speed based on difficulty)
+    if perfect_y > paddle.ycor() + 10:  # Add deadzone
+        move_amount = min(ai_max_speed, abs(perfect_y - paddle.ycor()))
+        paddle.sety(paddle.ycor() + move_amount)
+    elif perfect_y < paddle.ycor() - 10:  # Add deadzone
+        move_amount = min(ai_max_speed, abs(perfect_y - paddle.ycor()))
+        paddle.sety(paddle.ycor() - move_amount)
 
 def check_paddle_collision(ball, paddle, x_boundary):
     """Checks if the ball collides with a paddle."""
@@ -352,7 +444,7 @@ def select_game_mode(x, y):
     if -100 < x < 100 and 40 < y < 80:  # Solo Player
         one_player = True
         mode_selected = True
-        start_game()
+        select_difficulty()  # Show difficulty selection instead of starting game immediately
     
     elif -100 < x < 100 and -20 < y < 20:  # Two Player
         one_player = False
@@ -367,6 +459,65 @@ def select_game_mode(x, y):
         
     elif -100 < x < 100 and -200 < y < -160:  # Settings
         open_settings()
+
+def select_difficulty():
+    """Shows the difficulty selection screen."""
+    play_sound(click_sound)
+    hide_menu()
+    
+    create_text(0, 200, "Select Difficulty", font_size=28)
+    
+    # Draw difficulty buttons
+    draw_border(0, 100, 200, 50)
+    create_text(0, 90, "Easy", font_size=20)
+    
+    draw_border(0, 20, 200, 50)
+    create_text(0, 10, "Medium", font_size=20)
+    
+    draw_border(0, -60, 200, 50)
+    create_text(0, -70, "Hard", font_size=20)
+    
+    # Back button
+    draw_border(0, -140, 200, 40)
+    create_text(0, -150, "Back", font_size=18)
+    
+    def on_difficulty_click(x, y):
+        global difficulty_level, ai_accuracy, ai_reaction_delay, ai_max_speed, ai_prediction_error, ai_edge_weakness
+        
+        play_sound(click_sound)
+        
+        if -100 < x < 100 and 75 < y < 125:  # Easy
+            difficulty_level = "easy"
+            ai_accuracy = 0.5        # Lower accuracy
+            ai_reaction_delay = 10    # Slow reaction time
+            ai_max_speed = 10        # Slower paddle movement
+            ai_prediction_error = 0.5 # High error in prediction
+            ai_edge_weakness = 0.8   # Very weak near edges
+            start_game()
+            
+        elif -100 < x < 100 and -5 < y < 45:  # Medium
+            difficulty_level = "medium"
+            ai_accuracy = 0.7        # Medium accuracy
+            ai_reaction_delay = 6    # Medium reaction time
+            ai_max_speed = 15        # Medium paddle speed
+            ai_prediction_error = 0.3 # Medium prediction error
+            ai_edge_weakness = 0.5   # Somewhat weak near edges
+            start_game()
+            
+        elif -100 < x < 100 and -85 < y < -35:  # Hard
+            difficulty_level = "hard"
+            ai_accuracy = 0.85       # High accuracy (but not perfect)
+            ai_reaction_delay = 2    # Quick reaction time
+            ai_max_speed = 18        # Fast paddle movement
+            ai_prediction_error = 0.15 # Low prediction error
+            ai_edge_weakness = 0.3   # Slightly weak near edges
+            start_game()
+            
+        elif -100 < x < 100 and -160 < y < -120:  # Back
+            draw_main_menu()
+    
+    wn.onscreenclick(on_difficulty_click)
+    wn.update()
         
 def exit_game():
     play_sound(click_sound)
