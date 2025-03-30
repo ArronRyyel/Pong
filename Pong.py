@@ -20,21 +20,27 @@ wall_hit_sound = "sounds/wall_hit-3-48114.wav"
 score_sound = "sounds/score.wav"
 button_click_sound = "sounds/click.wav"
 
-# Load sounds - add placeholder handling if files don't exist
-try:
-    paddle_sound = pygame.mixer.Sound(paddle_hit_sound)
-    wall_sound = pygame.mixer.Sound(wall_hit_sound)
-    score_sound = pygame.mixer.Sound(score_sound)
-    click_sound = pygame.mixer.Sound(button_click_sound)
-except:
-    print("Some sound files could not be loaded. Continuing without sound.")
-    paddle_sound = None
-    wall_sound = None
-    score_sound = None
-    click_sound = None
+# Load sounds with improved error handling
+paddle_sound = None
+wall_sound = None
+score_sound_obj = None
+click_sound = None
 
-# Audio state
-audio_enabled = True
+try:
+    if os.path.exists(paddle_hit_sound):
+        paddle_sound = pygame.mixer.Sound(paddle_hit_sound)
+    if os.path.exists(wall_hit_sound):
+        wall_sound = pygame.mixer.Sound(wall_hit_sound)
+    if os.path.exists(score_sound):
+        score_sound_obj = pygame.mixer.Sound(score_sound)
+    if os.path.exists(button_click_sound):
+        click_sound = pygame.mixer.Sound(button_click_sound)
+except (pygame.error, FileNotFoundError) as e:
+    print(f"Error loading sound: {e}")
+    print("Game will continue without sound effects.")
+
+# Audio state - set to False if sounds couldn't be loaded
+audio_enabled = any([paddle_sound, wall_sound, score_sound_obj, click_sound])
 
 wn = turtle.Screen()
 wn.title("Pong Game")
@@ -44,12 +50,16 @@ wn.tracer(0)
 
 def resize_image(image_path, new_size=(80, 60)):
     """Resizes the image to a given size and saves it as a new file."""
-    img = Image.open(image_path)
-    img = img.resize(new_size)
-    
-    new_path = image_path.replace(".gif", "_resized.gif") 
-    img.save(new_path)
-    return new_path
+    try:
+        img = Image.open(image_path)
+        img = img.resize(new_size)
+        
+        new_path = image_path.replace(".gif", "_resized.gif") 
+        img.save(new_path)
+        return new_path
+    except (FileNotFoundError, IOError) as e:
+        print(f"Error processing image {image_path}: {e}")
+        return None
 
 original_skins = {
     "default": "#FF0000",
@@ -60,11 +70,23 @@ original_skins = {
 
 ball_skins = {}
 
+# Create skins directory if it doesn't exist
+if not os.path.exists("skins"):
+    os.makedirs("skins")
+    print("Created 'skins' directory. Please add skin images to this directory.")
+
 for skin, img in original_skins.items():
     if isinstance(img, str) and img.endswith(".gif"):
-        resized_img = resize_image(img)  
-        ball_skins[skin] = resized_img  
-        wn.addshape(resized_img)  
+        if os.path.exists(img):
+            resized_img = resize_image(img)  
+            if resized_img:
+                ball_skins[skin] = resized_img
+                wn.addshape(resized_img)
+            else:
+                ball_skins[skin] = "#FF0000"  # Fallback to red if resize fails
+        else:
+            print(f"Skin image not found: {img}")
+            ball_skins[skin] = "#FF0000"  # Fallback to red if file missing
     else:
         ball_skins[skin] = img  
 
@@ -100,7 +122,10 @@ menu_elements = []
 def play_sound(sound):
     """Play a sound if audio is enabled and the sound exists."""
     if audio_enabled and sound is not None:
-        sound.play()
+        try:
+            sound.play()
+        except (pygame.error, AttributeError):
+            pass  # Silently fail if sound playback fails
 
 def toggle_audio():
     """Toggle audio on/off."""
@@ -192,14 +217,14 @@ def main_game_loop():
             # Ball collision with left and right walls (scoring)
             if ball.xcor() > 490:
                 score_a += 1
-                play_sound(score_sound)
+                play_sound(score_sound_obj)
                 reset_ball(ball)
                 update_score(pen)
                 # Add recovery delay for AI after player scores
                 ai_recovery_counter = 30  # Delay AI response briefly after conceding
             elif ball.xcor() < -490:
                 score_b += 1
-                play_sound(score_sound)
+                play_sound(score_sound_obj)
                 reset_ball(ball)
                 update_score(pen)
 
@@ -221,10 +246,13 @@ def create_game_ui():
     # Clear any previous onscreenclick handlers
     wn.onscreenclick(None)
     
-    # Add gear icon for settings
-    wn.addshape("gear", turtle.Shape("compound"))
-    gear = ((0, 0), (10, 10), (0, 20), (-10, 10))
-    wn.addshape("gear", turtle.Shape("polygon", gear))
+    # Try to add gear icon shape, but handle exceptions
+    try:
+        wn.addshape("gear", turtle.Shape("compound"))
+        gear = ((0, 0), (10, 10), (0, 20), (-10, 10))
+        wn.addshape("gear", turtle.Shape("polygon", gear))
+    except turtle.TurtleGraphicsError:
+        print("Could not create custom gear shape")
     
     # Use square as placeholder for settings and audio buttons
     settings_button = create_settings_button()
@@ -417,11 +445,22 @@ def create_ball():
     ball = turtle.Turtle()
     ball.speed(0)
 
-    if ball_skins[selected_skin].endswith(".gif"):
-        ball.shape(ball_skins[selected_skin])  # Apply resized image
+    if selected_skin in ball_skins:
+        skin = ball_skins[selected_skin]
+        if isinstance(skin, str) and skin.endswith(".gif"):
+            ball.shape(skin)  # Apply resized image
+        else:
+            ball.shape("circle")
+            if isinstance(skin, str):
+                try:
+                    ball.color(skin)
+                except turtle.TurtleGraphicsError:
+                    ball.color("red")  # Fallback
+            else:
+                ball.color("red")
     else:
         ball.shape("circle")
-        ball.color("red")  # <-- Change default skin color to RED
+        ball.color("red")  # Default fallback
 
     ball.penup()
     ball.goto(0, 0)
@@ -538,13 +577,17 @@ def select_skin():
     for i, skin in enumerate(skins):
         draw_border(positions[i], 0, 120, 120)
 
-        if ball_skins[skin].endswith(".gif"):
+        if isinstance(ball_skins[skin], str) and ball_skins[skin].endswith(".gif"):
             # Create image turtle for skins
-            img_turtle = turtle.Turtle()
-            img_turtle.shape(ball_skins[skin])
-            img_turtle.penup()
-            img_turtle.goto(positions[i], 0)
-            menu_elements.append(img_turtle)
+            try:
+                img_turtle = turtle.Turtle()
+                img_turtle.shape(ball_skins[skin])
+                img_turtle.penup()
+                img_turtle.goto(positions[i], 0)
+                menu_elements.append(img_turtle)
+            except (turtle.TurtleGraphicsError, AttributeError) as e:
+                print(f"Error displaying skin {skin}: {e}")
+                create_text(positions[i], 0, "🔴", font_size=40)
         else:
             create_text(positions[i], 0, "🔴", font_size=40)  
 
@@ -688,6 +731,12 @@ def create_text(x, y, text, font_size=16):
 # Create sounds directory if it doesn't exist
 if not os.path.exists("sounds"):
     os.makedirs("sounds")
+    print("Created 'sounds' directory. Please add sound files to this directory.")
+    print("The following sound files are needed:")
+    print(f" - {paddle_hit_sound}")
+    print(f" - {wall_hit_sound}")
+    print(f" - {score_sound}")
+    print(f" - {button_click_sound}")
 
 # Initialize main menu
 draw_main_menu()
