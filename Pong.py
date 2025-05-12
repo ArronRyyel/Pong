@@ -30,6 +30,8 @@ class PongGame:
         self.difficulty_level = "medium"
         self.selected_skin = "default"
         self.version = "1.0.0" 
+        self.player_1_name = "Player 1"  # Default name for Player 1
+        self.player_2_name = "Player 2"  # Default name for Player 2
         
         self.menu_elements = []  # Initialize menu elements list
         
@@ -484,6 +486,76 @@ class PongGame:
                 return True
         return False
     
+    def prompt_player_names_screen(self):
+        """Custom screen to enter player names before starting Two Player mode."""
+        self.hide_menu()
+        self.screen.onscreenclick(None) 
+        self.player_1_name = ""
+        self.player_2_name = ""
+        self._name_entry_active = 1  # 1 for Player 1, 2 for Player 2
+        self._name_buffer = ""
+
+        # Draw border and title
+        self.draw_border(0, 40, self.calc_width(60), self.calc_height(60))
+        self.create_text(0, 100, "Enter Player Names", font_size=int(28 * self.scale_factor), color="darkblue")
+
+        # Draw input boxes
+        box_y1 = 40
+        box_y2 = -50
+        box_w = self.calc_width(40)
+        box_h = self.calc_height(10)
+        self.draw_border(0, box_y1, box_w, box_h, color="orange")
+        self.draw_border(0, box_y2, box_w, box_h, color="orange")
+        self.create_text(0, box_y1 + 25, "Player 1 Name:", font_size=int(16 * self.scale_factor))
+        self.create_text(0, box_y2 + 25, "Player 2 Name:", font_size=int(16 * self.scale_factor))
+
+        # Show initial input
+        self._player1_text = self.create_text(0, box_y1, "", font_size=int(18 * self.scale_factor), color="black")
+        self._player2_text = self.create_text(0, box_y2, "", font_size=int(18 * self.scale_factor), color="black")
+        self._entry_hint = self.create_text(0, -100, "Type name and press Enter", font_size=int(14 * self.scale_factor), color="gray40")
+
+        def update_display():
+            self._player1_text.clear()
+            self._player1_text.write(self.player_1_name if self._name_entry_active != 1 else self._name_buffer,
+                                 align="center", font=("Courier", int(18 * self.scale_factor), "bold"))
+            self._player2_text.clear()
+            self._player2_text.write(self.player_2_name if self._name_entry_active != 2 else self._name_buffer,
+                                 align="center", font=("Courier", int(18 * self.scale_factor), "bold"))
+            self.screen.update()
+
+        def on_key_press(char):
+            if char == "Return":
+                if self._name_entry_active == 1:
+                    self.player_1_name = self._name_buffer or "Player 1"
+                    self._name_buffer = ""
+                    self._name_entry_active = 2
+                    update_display()
+                elif self._name_entry_active == 2:
+                    self.player_2_name = self._name_buffer or "Player 2"
+                    self._name_buffer = ""
+                    # Remove key listeners
+                    for key in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_":
+                        self.screen.onkeypress(None, key)
+                    self.screen.onkeypress(None, "BackSpace")
+                    self.screen.onkeypress(None, "Return")
+                    self.screen.listen()
+                    self.start_game()
+            elif char == "BackSpace":
+                self._name_buffer = self._name_buffer[:-1]
+                update_display()
+            else:
+                if len(self._name_buffer) < 12 and char in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_":
+                    self._name_buffer += char
+                    update_display()
+
+        # Bind keys for input
+        for key in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_":
+            self.screen.onkeypress(lambda k=key: on_key_press(k), key)
+        self.screen.onkeypress(lambda: on_key_press("BackSpace"), "BackSpace")
+        self.screen.onkeypress(lambda: on_key_press("Return"), "Return")
+        self.screen.listen()
+        update_display()
+    
     def create_score_display(self):
         """Create the score display."""
         pen = turtle.Turtle()
@@ -500,13 +572,13 @@ class PongGame:
         pen = pen or self.pen
         if not pen:
             return
-            
+
         pen.clear()
         font_size = max(18, min(24, int(self.game_height / 30)))
-        scoreboard_y = self.boundary_y - (font_size * .1)
+        scoreboard_y = self.boundary_y - (font_size * 0.1)
         pen.goto(0, scoreboard_y)
-        pen.write(f"Player A: {self.score_a}  Player B: {self.score_b}", 
-                 align="center", font=("Courier", font_size, "normal"))
+        pen.write(f"{self.player_1_name}: {self.score_a}  {self.player_2_name}: {self.score_b}",
+              align="center", font=("Courier", font_size, "normal"))
     
     def create_paddle(self, x, y):
         """Create a paddle at the given position."""
@@ -651,10 +723,10 @@ class PongGame:
         
         # Two Player button
         elif (-button_width < x < button_width and 
-              button_y_offset - button_spacing < y < button_y_offset - button_spacing + button_height*2):
+            button_y_offset - button_spacing < y < button_y_offset - button_spacing + button_height*2):
             self.one_player = False
             self.mode_selected = True
-            self.start_game()
+            self.prompt_player_names_screen()   
         
         # Exit button
         elif (-button_width < x < button_width and 
@@ -865,16 +937,29 @@ class PongGame:
                 self.open_settings()
                 
             # Ball speed adjustment
-            elif (-self.calc_width(18.75) < x < self.calc_width(18.75) and 
-                  self.calc_height(-0.5) < y < self.calc_height(6.5)):
-                self.ball_speed_x = min(0.4, self.ball_speed_x + 0.05)
-                self.ball_speed_y = self.ball_speed_x
+            elif (-self.calc_width(18.75) < x < self.   calc_width(18.75) and 
+              self.calc_height(-0.5) < y < self.calc_height(6.5)):
+                mid_x = 0
+                # Decrease
+                if x < mid_x:
+                    self.ball_speed_x = max(0.05, self.ball_speed_x - 0.05)
+                    self.ball_speed_y = self.ball_speed_x
+                # Increase
+                else:
+                    self.ball_speed_x = min(0.4, self.ball_speed_x + 0.05)
+                    self.ball_speed_y = self.ball_speed_x
                 self.open_settings()
                 
             # Paddle speed adjustment
             elif (-self.calc_width(18.75) < x < self.calc_width(18.75) and 
-                  self.calc_height(-7.5) < y < self.calc_height(-0.5)):
-                self.paddle_speed = min(40, self.paddle_speed + 5)
+              self.calc_height(-7.5) < y < self.calc_height(-0.5)):
+                mid_x = 0
+                # Decrease
+                if x < mid_x:
+                    self.paddle_speed = max(5, self.paddle_speed - 5)
+                # Increase
+                else:
+                    self.paddle_speed = min(40, self.paddle_speed + 5)
                 self.open_settings()
                 
             # Back button
