@@ -28,6 +28,9 @@ class PongGame:
         self.one_player = False
         self.audio_enabled = True
         self.difficulty_level = "medium"
+        self.time_limit_seconds = 300  # 5 minutes
+        self.time_left = self.time_limit_seconds
+        self.timer_pen = None
         self.selected_skin = "default"
         self.version = "1.0.0" 
         self.player_1_name = "Player 1"  # Default name for Player 1
@@ -83,7 +86,7 @@ class PongGame:
         # Sound paths
         sound_files = {
             "paddle_hit": "sounds/boing-101318.wav",
-            "wall_hit": "sounds/wall_hit-3-48114.wav",
+            "wall_hit": "sounds/wall-hit-3-48114.wav",
             "score": "sounds/score.wav",
             "click": "sounds/click.wav"
         }
@@ -186,138 +189,195 @@ class PongGame:
         
         return button
     
-    def show_start_screen(self):
-        """Show an attractive press-to-start screen before the main menu."""
-        self.hide_menu()
+    
+    def create_timer_display(self):
+        """Create or update the timer display."""
+        if not self.timer_pen:
+            self.timer_pen = turtle.Turtle()
+            self.timer_pen.hideturtle()
+            self.timer_pen.penup()
+            self.timer_pen.color("black")
+            self.timer_pen.goto(0, self.boundary_y - 30)
+        self.update_timer_display()
 
-    # Set background color to black
+    def update_timer_display(self):
+        """Update the timer display."""
+        if self.timer_pen:
+            self.timer_pen.clear()
+            mins = int(self.time_left) // 60
+            secs = int(self.time_left) % 60
+            self.timer_pen.write(f"Time Left: {mins:02d}:{secs:02d}", align="center", font=("Courier", 18, "bold"))
+    
+    def show_start_screen(self):
+        """Show an enhanced animated press-to-start screen."""
+        self.hide_menu()
         self.screen.bgcolor("white")
 
-    # Create decorative border with glowing effect
+        # Optional: fade-in overlay effect
+        fade = turtle.Turtle(visible=False)
+        fade.penup()
+        fade.goto(0, 0)
+        fade.shape("circle")
+        fade.shapesize(self.game_height, self.game_width)
+        fade.color("white")
+        fade.stamp()
+        fade.hideturtle()
+
+        def fade_in():
+            for alpha in range(10, -1, -1):
+                fade.color((alpha / 10, alpha / 10, alpha / 10))  # grayscale fade
+                self.screen.update()
+                time.sleep(0.05)
+            fade.clear()
+
         self.draw_border(0, 0, self.game_width * 0.9, self.game_height * 0.8)
 
-    # Create title with neon effect
-        self.create_text(2, 102, "PONG", 
-                font_size=int(60 * self.scale_factor),
-                color="darkblue",)
-        self.create_text(0, 100, "PONG", 
-                font_size=int(60 * self.scale_factor),
-                color="orange",)
+        # Neon glowing title using layered text
+        self.create_text(2, 102, "PONG", font_size=int(60 * self.scale_factor), color="darkblue")
+        self.create_text(1, 101, "PONG", font_size=int(60 * self.scale_factor), color="blue")
+        self.create_text(0, 100, "PONG", font_size=int(60 * self.scale_factor), color="cyan")
 
-    # Create pulsing "Press Anywhere" text
-        press_text = self.create_text(0, 40, "Press Anywhere to Start", 
-                            font_size=int(18 * self.scale_factor),
-                            color="black")
+        # Pulsing "Press Anywhere" text
+        press_text = self.create_text(0, 40, "Press Anywhere to Start", font_size=int(18 * self.scale_factor), color="black")
         self.menu_elements.append(press_text)
-    
-    # Add version info
-        try:
-            version_text = f"Version {self.version}"
-        except AttributeError:
-            version_text = "Classic Pong"
-    
-        self.create_text(0, -self.game_height * 0.4 + 20, 
-                version_text, 
-                font_size=int(12 * self.scale_factor),
-                color="gray70")
-    
-    # Add multiple animated balls without trails (to avoid visual clutter)
+
+        # Version info
+        version_text = f"Version {getattr(self, 'version', 'Classic Pong')}"
+        self.create_text(0, -self.game_height * 0.4 + 20, version_text, font_size=int(12 * self.scale_factor), color="gray70")
+
+        # Animated bouncing balls
         balls = []
         ball_colors = ["red", "blue", "green", "yellow", "purple"]
-    
         for i in range(3):
-        # Create ball
             ball = turtle.Turtle()
             ball.shape("circle")
             ball.shapesize(0.7)
             ball.color(ball_colors[i % len(ball_colors)])
-            ball.penup()  # Keep pen up to avoid drawing trails
-        
-        # Randomize starting position
-            start_x = -200 + i * 100
-            start_y = -50 + i * 40
-            ball.goto(start_x, start_y)
-        
-        # Randomize direction and speed
+            ball.penup()
+            ball.goto(-200 + i * 100, -50 + i * 40)
             ball.dx = 2 + i * 0.5
             ball.dy = 1 + i * 0.3
-        
             balls.append(ball)
             self.menu_elements.append(ball)
-    
-    # Variable to control animation state
+
         self.start_screen_active = True
-    
+
         def animate_elements():
-            """Animate all elements on the start screen."""
-            if not hasattr(self, 'start_screen_active') or not self.start_screen_active:
+            if not self.start_screen_active:
                 return
-            
-        # Animate balls
+
             for ball in balls:
-            # Move ball
                 ball.setx(ball.xcor() + ball.dx)
                 ball.sety(ball.ycor() + ball.dy)
-            
-            # Bounce off the edges of the border
                 border_x = self.game_width * 0.44
                 border_y = self.game_height * 0.34
-            
-                if ball.xcor() > border_x or ball.xcor() < -border_x:
+
+                if abs(ball.xcor()) > border_x:
+                    ball.setx(max(min(ball.xcor(), border_x), -border_x))
                     ball.dx *= -1
-                    try:
-                        self.play_sound("bounce")
-                    except:
-                        pass
-                
-                if ball.ycor() > border_y or ball.ycor() < -border_y:
+                    try: self.play_sound("bounce")
+                    except: pass
+
+                if abs(ball.ycor()) > border_y:
+                    ball.sety(max(min(ball.ycor(), border_y), -border_y))
                     ball.dy *= -1
-                    try:
-                        self.play_sound("bounce")
-                    except:
-                        pass
-        
-        # Pulse the "Press Anywhere" text - use simpler color changing technique
+                    try: self.play_sound("bounce")
+                    except: pass
+
+            # Smooth pulsing effect
             try:
-                import time
-                pulse_colors = ["white", "cyan", "white", "cyan"]
-                color_index = int(time.time() * 2) % len(pulse_colors)
-                press_text.color(pulse_colors[color_index])
+                t = time.time()
+                r = int(127 + 128 * (0.5 + 0.5 * math.sin(t * 2)))
+                g = int(255 - r // 2)
+                b = r
+                color = f'#{r:02x}{g:02x}{b:02x}'
+                press_text.color(color)
             except:
-            # Fallback if time module isn't available
                 pass
-        
-        # Continue animation if still on the start screen
-            if hasattr(self, 'start_screen_active') and self.start_screen_active:
-                self.screen.ontimer(animate_elements, 50)  # Lower frame rate for better performance
-    
-    # Start the animation
+
+            self.screen.ontimer(animate_elements, 50)
+
+        import time, math
+        fade_in()
         animate_elements()
-    
-    # Set up event handlers
+
+
+        # --- HELP BUTTON FEATURE ---
+        help_x = self.game_width // 2 - 40
+        help_y = -self.game_height // 2 + 40
+        self.draw_border(help_x, help_y, 48, 48, color="orange")
+        help_btn = self.create_text(help_x, help_y -20, "?", font_size=int(28 * self.scale_factor), color="darkblue")
+        self.menu_elements.append(help_btn)
+
+        def show_manual(x, y):
+            # Check if click is inside the help button
+            if (help_x - 20 < x < help_x + 20) and (help_y - 20 < y < help_y + 20):
+                self.screen.onscreenclick(None)  # Disable further clicks
+                
+                 # Hide animated balls
+                for obj in self.menu_elements:
+                    if isinstance(obj, turtle.Turtle) and obj.shape() == "circle":
+                        obj.hideturtle()
+                
+                # Draw filled background for the manual
+                bg = turtle.Turtle()
+                bg.hideturtle()
+                bg.penup()
+                bg.goto(-self.calc_width(80)//2, -self.calc_height(60)//2)
+                bg.pendown()
+                bg.color("black")
+                bg.begin_fill()
+                for _ in range(2):
+                    bg.forward(self.calc_width(80))
+                    bg.left(90)
+                    bg.forward(self.calc_height(60))
+                    bg.left(90)
+                bg.end_fill()
+                bg.penup()
+                self.menu_elements.append(bg)
+
+                # Draw manual border
+                self.draw_border(0, 0, self.calc_width(80), self.calc_height(60), color="orange", pen_width=4)
+                manual_lines = [
+                    "PONG GAME MANUAL",
+                    "",
+                    "Goal: Score points by getting the ball past your opponent's paddle.",
+                    "",
+                    "Controls:",
+                    "  Player 1: W/S to move up/down",
+                    "  Player 2: Up/Down arrows to move up/down",
+                    "",
+                    "First to reach the winning score wins!",
+                    "",
+                    "Press any key or click to close this manual."
+                ]
+                y_start = 120
+                for i, line in enumerate(manual_lines):
+                    self.create_text(0, y_start - i*28, line, font_size=int(12 * self.scale_factor), color="white")
+                self.screen.update()
+
+                def close_manual(*args):
+                    self.show_start_screen()  # Redraw start screen
+                self.screen.onscreenclick(lambda x, y: close_manual())
+                self.screen.onkeypress(close_manual, "Return")
+                self.screen.onkeypress(close_manual, "space")
+                self.screen.listen()
+            else:
+                # If not help, treat as start
+                start_on_click(x, y)
+
         def start_on_click(x, y):
-            self.start_screen_active = False  # Stop animations
+            self.start_screen_active = False
             try:
                 self.play_sound("click")
             except:
                 pass
-        
-        # Clean up
-            self.screen.onscreenclick(None)  # Remove click handler
-        
-        # Go to main menu
+            self.screen.onscreenclick(None)
             self.create_main_menu()
-    
-    # Listen for clicks
-        self.screen.onscreenclick(start_on_click)
-    
-    # Try to add keyboard support
-        try:
-            self.screen.onkeypress(lambda: start_on_click(0, 0), "Return")
-            self.screen.onkeypress(lambda: start_on_click(0, 0), "space")
-        except:
-            pass
-        
+
+        self.screen.onscreenclick(show_manual)
+        self.screen.onkeypress(lambda: start_on_click(0, 0), "Return")
+        self.screen.onkeypress(lambda: start_on_click(0, 0), "space")
         self.screen.listen()
         self.screen.update()
     
@@ -325,6 +385,10 @@ class PongGame:
         """Start the main game."""
         self.hide_menu()
         self.reset_scores()
+        
+        if not self.one_player:
+            self.time_left = self.time_limit_seconds
+            self.create_timer_display()
         
         # Create game objects
         self.paddle_a = self.create_paddle(-self.paddle_x_position, 0)
@@ -335,9 +399,9 @@ class PongGame:
         
         # Set up key bindings
         self.setup_key_bindings()
-        
         # Start game loop
         self.game_running = True
+        # Timer logic for two player mode
         self.game_loop()
     
     def setup_key_bindings(self):
@@ -360,7 +424,7 @@ class PongGame:
     
         while self.game_running:
             self.screen.update()
-        
+
             if not self.paused:
             # Move ball
                 self.ball.setx(self.ball.xcor() + self.ball.dx)
@@ -368,10 +432,10 @@ class PongGame:
 
             # AI player logic
                 if self.one_player:
-                    if ai_recovery_counter > 0:
-                        ai_recovery_counter -= 1
+                    if ai_recovery_counter > .0100:
+                        ai_recovery_counter -= .1
                 
-                    ai_frame_counter += 1
+                    ai_frame_counter += .1
                     if ai_frame_counter >= self.ai_reaction_delay and ai_recovery_counter == 0:
                         self.ai_move_paddle(self.paddle_b, self.ball)
                         ai_frame_counter = 0
@@ -393,18 +457,93 @@ class PongGame:
                     self.play_sound("score")
                     self.reset_ball()
                     self.update_score()
+                    
+                # --- WIN CHECK FOR EASY MODE ---
+                if self.one_player and self.difficulty_level == "easy":
+                    if self.score_a >= 5 or self.score_b >= 5:
+                        self.game_running = False
+                        winner = self.player_1_name if self.score_a >= 5 else "AI"
+                        self.show_end_screen(winner)
+                        break
+                    
+                if self.one_player and self.difficulty_level == "medium":
+                    if self.score_a >= 10 or self.score_b >= 3:
+                        self.game_running = False
+                        winner = self.player_1_name if self.score_a >= 10 else "AI"
+                        self.show_end_screen(winner)
+                        break
+                
+                if self.one_player and self.difficulty_level == "hard":
+                    if self.score_a >= 15 or self.score_b >= 5:
+                        self.game_running = False
+                        winner = self.player_1_name if self.score_a >= 15 else "AI"
+                        self.show_end_screen(winner)
+                        break
 
             # Paddle collisions with improved bounce logic
-                paddle_collision_margin = self.paddle_x_position - 10
+                paddle_collision_margin = self.paddle_x_position - 20
                 if self.check_paddle_collision(self.ball, self.paddle_b, paddle_collision_margin):
                     self.ball.dx = -abs(self.ball.dx)  # Ensure ball moves left
                     self.play_sound("paddle_hit")
                 elif self.check_paddle_collision(self.ball, self.paddle_a, -paddle_collision_margin):
                     self.ball.dx = abs(self.ball.dx)  # Ensure ball moves right
                     self.play_sound("paddle_hit")
-        
+                        # Timer logic for two player mode
+                if not self.one_player:
+                    self.time_left -= 0.01
+                    self.update_timer_display()
+                    if self.time_left <= 0:
+                        self.game_running = False
+                        # Decide winner or tie
+                        if self.score_a > self.score_b:
+                            winner = self.player_1_name
+                        elif self.score_b > self.score_a:
+                            winner = self.player_2_name
+                        else:
+                            winner = "It's a Tie!"
+                        self.show_end_screen(winner)
+                        break
+            
         # Control game speed
             time.sleep(0.01)
+        
+    def show_end_screen(self, winner):
+        """Show end screen with winner and options to rematch or return to menu."""
+        
+        # Hide gameplay objects
+        if hasattr(self, 'paddle_a'):
+            self.paddle_a.hideturtle()
+        if hasattr(self, 'paddle_b'):
+            self.paddle_b.hideturtle()
+        if hasattr(self, 'ball'):
+            self.ball.hideturtle()
+        if hasattr(self, 'pen'):
+            self.pen.clear()
+            self.pen.hideturtle()
+        if self.timer_pen:
+            self.timer_pen.clear()
+            self.timer_pen.hideturtle()  # <-- Add this line
+            
+        self.hide_menu()
+        self.screen.bgcolor("white")
+        self.create_text(0, 80, f"{winner} Wins!", font_size=int(36 * self.scale_factor), color="darkblue")
+        self.create_text(0, 20, "Rematch", font_size=int(24 * self.scale_factor), color="green")
+        self.create_text(0, -50, "Back to Menu", font_size=int(24 * self.scale_factor), color="orange")
+        self.draw_border(0, 30, 200, 50, color="green")
+        self.draw_border(0, -30, 200, 50, color="orange")
+
+        def on_end_click(x, y):
+            if -100 < x < 100 and 5 < y < 55:
+                self.play_sound("click")
+                self.hide_menu()
+                self.reset_scores()
+                self.start_game()
+            elif -100 < x < 100 and -55 < y < -5:
+                self.play_sound("click")
+                self.create_main_menu()
+
+        self.screen.onscreenclick(on_end_click)
+        self.screen.update()
     
     def move_paddle(self, paddle, distance):
         """Move a paddle while staying within boundaries."""
@@ -422,6 +561,10 @@ class PongGame:
                 self.move_paddle(paddle, random_move)
             return
         
+        # --- Add a miss chance ---
+        if random.random() < 0.08:  
+            return
+        
         # Predict ball position
         predicted_y = self.predict_ball_y(ball, paddle)
         
@@ -434,7 +577,7 @@ class PongGame:
         
         # Add randomness based on difficulty
         if random.random() > self.ai_accuracy:
-            noise_factor = (1 - self.ai_accuracy) * (self.game_height / 5)
+            noise_factor = (1 - self.ai_accuracy) * (self.game_height / 2)
             perfect_y += random.uniform(-noise_factor, noise_factor)
         
         # Limit to screen boundaries
@@ -474,8 +617,8 @@ class PongGame:
     
     def check_paddle_collision(self, ball, paddle, x_boundary):
         """Check if the ball collides with a paddle."""
-        paddle_width = 20
-        paddle_height = 70
+        paddle_width = 30
+        paddle_height = 80
         # Check if ball is within paddle's vertical range
         if paddle.ycor() - paddle_height < ball.ycor() < paddle.ycor() + paddle_height:
         # For right paddle (positive x_boundary)
@@ -800,20 +943,20 @@ class PongGame:
             self.ai_accuracy = 0.5
             self.ai_reaction_delay = 10
             self.ai_max_speed = 10
-            self.ai_prediction_error = 0.5
-            self.ai_edge_weakness = 0.8
+            self.ai_prediction_error = 1
+            self.ai_edge_weakness = 1.2
         elif level == "medium":
-            self.ai_accuracy = 0.7
+            self.ai_accuracy = 0.100
             self.ai_reaction_delay = 6
             self.ai_max_speed = 15
-            self.ai_prediction_error = 0.3
-            self.ai_edge_weakness = 0.5
+            self.ai_prediction_error = 0.6
+            self.ai_edge_weakness = 0.8
         elif level == "hard":
-            self.ai_accuracy = 0.85
+            self.ai_accuracy = 1
             self.ai_reaction_delay = 2
-            self.ai_max_speed = 18
-            self.ai_prediction_error = 0.15
-            self.ai_edge_weakness = 0.3
+            self.ai_max_speed = 20
+            self.ai_prediction_error = 0.10
+            self.ai_edge_weakness = 0.10
     
     def exit_game(self):
         """Cleanly exit the game."""
@@ -973,6 +1116,10 @@ class PongGame:
     def create_main_menu(self):
         """Create the main menu screen."""
         self.hide_menu()
+        if self.timer_pen:
+            self.timer_pen.clear()
+            self.timer_pen.hideturtle()
+        
         
         # Title
         self.create_text(0, self.calc_height(25), "PONG GAME", font_size=int(36 * self.scale_factor))
